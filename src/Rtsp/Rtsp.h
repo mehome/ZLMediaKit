@@ -1,28 +1,13 @@
 ﻿/*
- * MIT License
+ * Copyright (c) 2016 The ZLMediaKit project authors. All Rights Reserved.
  *
- * Copyright (c) 2016 xiongziliang <771730766@qq.com>
+ * This file is part of ZLMediaKit(https://github.com/xia-chu/ZLMediaKit).
  *
- * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
+ * Use of this source code is governed by MIT license that can be found in the
+ * LICENSE file in the root of the source tree. All contributing project authors
+ * may be found in the AUTHORS file in the root of the source tree.
  */
+
 #ifndef RTSP_RTSP_H_
 #define RTSP_RTSP_H_
 
@@ -30,190 +15,369 @@
 #include <string>
 #include <memory>
 #include <unordered_map>
-#include "Common/config.h"
 #include "Util/util.h"
+#include "Common/config.h"
+#include "Common/macros.h"
+#include "Extension/Frame.h"
 
 using namespace std;
-using namespace ZL::Util;
+using namespace toolkit;
+using namespace mediakit;
+
+namespace mediakit {
+
+namespace Rtsp {
+typedef enum {
+    RTP_Invalid = -1,
+    RTP_TCP = 0,
+    RTP_UDP = 1,
+    RTP_MULTICAST = 2,
+} eRtpType;
+
+#define RTP_PT_MAP(XX) \
+    XX(PCMU, TrackAudio, 0, 8000, 1, CodecG711U) \
+    XX(GSM, TrackAudio , 3, 8000, 1, CodecInvalid) \
+    XX(G723, TrackAudio, 4, 8000, 1, CodecInvalid) \
+    XX(DVI4_8000, TrackAudio, 5, 8000, 1, CodecInvalid) \
+    XX(DVI4_16000, TrackAudio, 6, 16000, 1, CodecInvalid) \
+    XX(LPC, TrackAudio, 7, 8000, 1, CodecInvalid) \
+    XX(PCMA, TrackAudio, 8, 8000, 1, CodecG711A) \
+    XX(G722, TrackAudio, 9, 8000, 1, CodecInvalid) \
+    XX(L16_Stereo, TrackAudio, 10, 44100, 2, CodecInvalid) \
+    XX(L16_Mono, TrackAudio, 11, 44100, 1, CodecInvalid) \
+    XX(QCELP, TrackAudio, 12, 8000, 1, CodecInvalid) \
+    XX(CN, TrackAudio, 13, 8000, 1, CodecInvalid) \
+    XX(MPA, TrackAudio, 14, 90000, 1, CodecInvalid) \
+    XX(G728, TrackAudio, 15, 8000, 1, CodecInvalid) \
+    XX(DVI4_11025, TrackAudio, 16, 11025, 1, CodecInvalid) \
+    XX(DVI4_22050, TrackAudio, 17, 22050, 1, CodecInvalid) \
+    XX(G729, TrackAudio, 18, 8000, 1, CodecInvalid) \
+    XX(CelB, TrackVideo, 25, 90000, 1, CodecInvalid) \
+    XX(JPEG, TrackVideo, 26, 90000, 1, CodecInvalid) \
+    XX(nv, TrackVideo, 28, 90000, 1, CodecInvalid) \
+    XX(H261, TrackVideo, 31, 90000, 1, CodecInvalid) \
+    XX(MPV, TrackVideo, 32, 90000, 1, CodecInvalid) \
+    XX(MP2T, TrackVideo, 33, 90000, 1, CodecInvalid) \
+    XX(H263, TrackVideo, 34, 90000, 1, CodecInvalid) \
 
 typedef enum {
-	TrackVideo = 0, TrackAudio
-} TrackType;
+#define ENUM_DEF(name, type, value, clock_rate, channel, codec_id) PT_ ## name = value,
+    RTP_PT_MAP(ENUM_DEF)
+#undef ENUM_DEF
+    PT_MAX = 128
+} PayloadType;
 
-class RtspTrack{
-public:
-	uint8_t PT;
-    uint8_t interleaved;
-	TrackType type = (TrackType) -1;
-	string trackSdp;
-    string controlSuffix;
-	bool inited;
-	uint32_t ssrc = 0;
-	uint16_t seq;
-	uint32_t timeStamp;
 };
 
-class RtpPacket {
+#if defined(_WIN32)
+#pragma pack(push, 1)
+#endif // defined(_WIN32)
+
+class RtpHeader {
 public:
-    typedef std::shared_ptr<RtpPacket> Ptr;
-    uint8_t interleaved;
-    uint8_t PT;
-    bool mark;
-    uint32_t length;
-    uint32_t timeStamp;
-    uint16_t sequence;
+#if __BYTE_ORDER == __BIG_ENDIAN
+    //版本号，固定为2
+    uint32_t version: 2;
+    //padding
+    uint32_t padding: 1;
+    //扩展
+    uint32_t ext: 1;
+    //csrc
+    uint32_t csrc: 4;
+    //mark
+    uint32_t mark: 1;
+    //负载类型
+    uint32_t pt: 7;
+#else
+    //csrc
+    uint32_t csrc: 4;
+    //扩展
+    uint32_t ext: 1;
+    //padding
+    uint32_t padding: 1;
+    //版本号，固定为2
+    uint32_t version: 2;
+    //负载类型
+    uint32_t pt: 7;
+    //mark
+    uint32_t mark: 1;
+#endif
+    //序列号
+    uint32_t seq: 16;
+    //时间戳
+    uint32_t stamp;
+    //ssrc
     uint32_t ssrc;
-    uint8_t payload[1560];
-	uint8_t offset;
-    TrackType type;
-};
+    //负载，如果有csrc和ext，前面为 4 * csrc + (4 + 4 * ext_len)
+    uint8_t payload;
 
-class RtcpCounter {
 public:
-    uint32_t pktCnt = 0;
-    uint32_t octCount = 0;
-    uint32_t timeStamp = 0;
-};
+    //返回csrc字段字节长度
+    size_t getCsrcSize() const;
+    //返回csrc字段首地址，不存在时返回nullptr
+    uint8_t *getCsrcData();
 
-string FindField(const char* buf, const char* start, const char *end,int bufSize = 0 );
-int parserSDP(const string& sdp, RtspTrack Track[2]);
+    //返回ext字段字节长度
+    size_t getExtSize() const;
+    //返回ext reserved值
+    uint16_t getExtReserved() const;
+    //返回ext段首地址，不存在时返回nullptr
+    uint8_t *getExtData();
 
-
-struct StrCaseCompare
-{
-    bool operator()(const string& __x, const string& __y) const
-    {return strcasecmp(__x.data(), __y.data()) < 0 ;}
-};
-typedef map<string,string,StrCaseCompare> StrCaseMap;
-
-class Parser {
-public:
-	Parser() {}
-	virtual ~Parser() {}
-	void Parse(const char *buf) {
-		//解析
-		const char *start = buf;
-		Clear();
-		while (true) {
-			auto line = FindField(start, NULL, "\r\n");
-			if (line.size() == 0) {
-				break;
-			}
-			if (start == buf) {
-				m_strMethod = FindField(line.c_str(), NULL, " ");
-                m_strFullUrl = FindField(line.c_str(), " ", " ");
-				auto args_pos =  m_strFullUrl.find('?');
-				if(args_pos != string::npos){
-					m_strUrl = m_strFullUrl.substr(0,args_pos);
-					m_mapUrlArgs = parseArgs(m_strFullUrl.substr(args_pos + 1 ));
-				}else{
-					m_strUrl = m_strFullUrl;
-				}
-				m_strTail = FindField(line.c_str(), (m_strFullUrl + " ").c_str(), NULL);
-			} else {
-				auto field = FindField(line.c_str(), NULL, ": ");
-				auto value = FindField(line.c_str(), ": ", NULL);
-				if (field.size() != 0) {
-					m_mapHeaders[field] = value;
-				}
-			}
-			start = start + line.size() + 2;
-			if (strncmp(start, "\r\n", 2) == 0) { //协议解析完毕
-				m_strContent = FindField(start, "\r\n", NULL);
-				break;
-			}
-		}
-	}
-	const string& Method() const {
-		//rtsp方法
-		return m_strMethod;
-	}
-	const string& Url() const {
-		//rtsp url
-		return m_strUrl;
-	}
-    const string& FullUrl() const {
-        //rtsp url with args
-        return m_strFullUrl;
-    }
-	const string& Tail() const {
-		//RTSP/1.0
-		return m_strTail;
-	}
-	const string& operator[](const char *name) const {
-		//rtsp field
-		auto it = m_mapHeaders.find(name);
-		if (it == m_mapHeaders.end()) {
-			return m_strNull;
-		}
-		return it->second;
-	}
-	const string& Content() const {
-		return m_strContent;
-	}
-	void Clear() {
-		m_strMethod.clear();
-		m_strUrl.clear();
-        m_strFullUrl.clear();
-		m_strTail.clear();
-		m_strContent.clear();
-		m_mapHeaders.clear();
-		m_mapUrlArgs.clear();
-	}
-
-	void setUrl(const string& url) {
-		this->m_strUrl = url;
-	}
-	void setContent(const string& content) {
-		this->m_strContent = content;
-	}
-
-	StrCaseMap& getValues() const {
-		return m_mapHeaders;
-	}
-	StrCaseMap& getUrlArgs() const {
-		return m_mapUrlArgs;
-	}
-
-
-	static StrCaseMap parseArgs(const string &str,const char *pair_delim = "&", const char *key_delim = "="){
-		StrCaseMap ret;
-		auto arg_vec = split(str, pair_delim);
-		for (string &key_val : arg_vec) {
-			auto key_val_vec = split(key_val, key_delim);
-			if (key_val_vec.size() >= 2) {
-				ret[key_val_vec[0]] = key_val_vec[1];
-			}
-		}
-		return ret;
-	}
+    //返回有效负载指针,跳过csrc、ext
+    uint8_t* getPayloadData();
+    //返回有效负载总长度,不包括csrc、ext、padding
+    size_t getPayloadSize(size_t rtp_size) const;
+    //打印调试信息
+    string dumpString(size_t rtp_size) const;
 
 private:
-	string m_strMethod;
-	string m_strUrl;
-	string m_strTail;
-	string m_strContent;
-	string m_strNull;
-    string m_strFullUrl;
-	mutable StrCaseMap m_mapHeaders;
-	mutable StrCaseMap m_mapUrlArgs;
+    //返回有效负载偏移量
+    size_t getPayloadOffset() const;
+    //返回padding长度
+    size_t getPaddingSize(size_t rtp_size) const;
+} PACKED;
+
+#if defined(_WIN32)
+#pragma pack(pop)
+#endif // defined(_WIN32)
+
+//此rtp为rtp over tcp形式，需要忽略前4个字节
+class RtpPacket : public BufferRaw{
+public:
+    using Ptr = std::shared_ptr<RtpPacket>;
+    enum {
+        kRtpVersion = 2,
+        kRtpHeaderSize = 12,
+        kRtpTcpHeaderSize = 4
+    };
+
+    //获取rtp头
+    RtpHeader* getHeader();
+    //打印调试信息
+    string dumpString() const;
+
+    //主机字节序的seq
+    uint16_t getSeq();
+    //主机字节序的时间戳，已经转换为毫秒
+    uint32_t getStampMS();
+    //主机字节序的ssrc
+    uint32_t getSSRC();
+    //有效负载，跳过csrc、ext
+    uint8_t* getPayload();
+    //有效负载长度，不包括csrc、ext、padding
+    size_t getPayloadSize();
+
+    //音视频类型
+    TrackType type;
+    //音频为采样率，视频一般为90000
+    uint32_t sample_rate;
+
+    static Ptr create();
+
+private:
+    friend class ResourcePool_l<RtpPacket>;
+    RtpPacket() = default;
+
+private:
+    //对象个数统计
+    ObjectStatistic<RtpPacket> _statistic;
 };
 
-typedef struct {
-	unsigned forbidden_zero_bit :1;
-	unsigned nal_ref_idc :2;
-	unsigned type :5;
-} NALU;
+class RtpPayload {
+public:
+    static int getClockRate(int pt);
+    static TrackType getTrackType(int pt);
+    static int getAudioChannel(int pt);
+    static const char *getName(int pt);
+    static CodecId getCodecId(int pt);
 
-typedef struct {
-	unsigned S :1;
-	unsigned E :1;
-	unsigned R :1;
-	unsigned type :5;
-} FU;
+private:
+    RtpPayload() = delete;
+    ~RtpPayload() = delete;
+};
 
-bool MakeNalu(uint8_t in, NALU &nal) ;
-bool MakeFU(uint8_t in, FU &fu) ;
+class SdpTrack {
+public:
+    using Ptr = std::shared_ptr<SdpTrack>;
 
+    string _m;
+    string _o;
+    string _s;
+    string _i;
+    string _c;
+    string _t;
+    string _b;
+    uint16_t _port;
 
+    float _duration = 0;
+    float _start = 0;
+    float _end = 0;
+
+    map<char, string> _other;
+    map<string, string> _attr;
+
+    string toString() const;
+    string getName() const;
+    string getControlUrl(const string &base_url) const;
+
+public:
+    int _pt;
+    int _channel;
+    int _samplerate;
+    TrackType _type;
+    string _codec;
+    string _fmtp;
+    string _control;
+
+public:
+    bool _inited = false;
+    uint8_t _interleaved = 0;
+    uint16_t _seq = 0;
+    uint32_t _ssrc = 0;
+    //时间戳，单位毫秒
+    uint32_t _time_stamp = 0;
+};
+
+class SdpParser {
+public:
+    using Ptr = std::shared_ptr<SdpParser>;
+
+    SdpParser() {}
+    SdpParser(const string &sdp) { load(sdp); }
+    ~SdpParser() {}
+
+    void load(const string &sdp);
+    bool available() const;
+    SdpTrack::Ptr getTrack(TrackType type) const;
+    vector<SdpTrack::Ptr> getAvailableTrack() const;
+    string toString() const;
+
+private:
+    vector<SdpTrack::Ptr> _track_vec;
+};
+
+/**
+ * 解析rtsp url的工具类
+ */
+class RtspUrl{
+public:
+    bool _is_ssl;
+    uint16_t _port;
+    string _url;
+    string _user;
+    string _passwd;
+    string _host;
+
+public:
+    RtspUrl() = default;
+    ~RtspUrl() = default;
+    bool parse(const string &url);
+
+private:
+    bool setup(bool,const string &, const string &, const string &);
+};
+
+/**
+* rtsp sdp基类
+*/
+class Sdp : public CodecInfo{
+public:
+    using Ptr = std::shared_ptr<Sdp>;
+
+    /**
+     * 构造sdp
+     * @param sample_rate 采样率
+     * @param payload_type pt类型
+     */
+    Sdp(uint32_t sample_rate, uint8_t payload_type){
+        _sample_rate = sample_rate;
+        _payload_type = payload_type;
+    }
+
+    virtual ~Sdp(){}
+
+    /**
+     * 获取sdp字符串
+     * @return
+     */
+    virtual string getSdp() const  = 0;
+
+    /**
+     * 获取pt
+     * @return
+     */
+    uint8_t getPayloadType() const{
+        return _payload_type;
+    }
+
+    /**
+     * 获取采样率
+     * @return
+     */
+    uint32_t getSampleRate() const{
+        return _sample_rate;
+    }
+
+private:
+    uint8_t _payload_type;
+    uint32_t _sample_rate;
+};
+
+/**
+* sdp中除音视频外的其他描述部分
+*/
+class TitleSdp : public Sdp{
+public:
+
+    /**
+     * 构造title类型sdp
+     * @param dur_sec rtsp点播时长，0代表直播，单位秒
+     * @param header 自定义sdp描述
+     * @param version sdp版本
+     */
+    TitleSdp(float dur_sec = 0,
+             const map<string,string> &header = map<string,string>(),
+             int version = 0) : Sdp(0,0){
+        _printer << "v=" << version << "\r\n";
+
+        if(!header.empty()){
+            for (auto &pr : header){
+                _printer << pr.first << "=" << pr.second << "\r\n";
+            }
+        } else {
+            _printer << "o=- 0 0 IN IP4 0.0.0.0\r\n";
+            _printer << "s=Streamed by " << SERVER_NAME << "\r\n";
+            _printer << "c=IN IP4 0.0.0.0\r\n";
+            _printer << "t=0 0\r\n";
+        }
+
+        if(dur_sec <= 0){
+            //直播
+            _printer << "a=range:npt=now-\r\n";
+        }else{
+            //点播
+            _printer << "a=range:npt=0-" << dur_sec  << "\r\n";
+        }
+        _printer << "a=control:*\r\n";
+    }
+    string getSdp() const override {
+        return _printer;
+    }
+
+    CodecId getCodecId() const override{
+        return CodecInvalid;
+    }
+private:
+    _StrPrinter _printer;
+};
+
+//创建rtp over tcp4个字节的头
+Buffer::Ptr makeRtpOverTcpPrefix(uint16_t size, uint8_t interleaved);
+//创建rtp-rtcp端口对
+void makeSockPair(std::pair<Socket::Ptr, Socket::Ptr> &pair, const string &local_ip);
+//十六进制方式打印ssrc
+string printSSRC(uint32_t ui32Ssrc);
+
+} //namespace mediakit
 #endif //RTSP_RTSP_H_

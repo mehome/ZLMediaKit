@@ -1,27 +1,11 @@
 ﻿/*
- * MIT License
+ * Copyright (c) 2016 The ZLMediaKit project authors. All Rights Reserved.
  *
- * Copyright (c) 2016 xiongziliang <771730766@qq.com>
+ * This file is part of ZLMediaKit(https://github.com/xia-chu/ZLMediaKit).
  *
- * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
+ * Use of this source code is governed by MIT license that can be found in the
+ * LICENSE file in the root of the source tree. All contributing project authors
+ * may be found in the AUTHORS file in the root of the source tree.
  */
 
 #ifndef SRC_PLAYER_PLAYERBASE_H_
@@ -31,221 +15,266 @@
 #include <memory>
 #include <string>
 #include <functional>
-#include "Player.h"
 #include "Network/Socket.h"
 #include "Util/mini.h"
+#include "Util/RingBuffer.h"
+#include "Common/MediaSource.h"
+#include "Common/MediaSink.h"
+#include "Extension/Frame.h"
+#include "Extension/Track.h"
+using namespace toolkit;
 
-using namespace std;
-using namespace ZL::Util;
-using namespace ZL::Network;
+namespace mediakit {
 
-namespace ZL {
-namespace Player {
-
-class PlayerBase : public mINI{
+class DemuxerBase : public TrackSource{
 public:
-	typedef std::shared_ptr<PlayerBase> Ptr;
-	typedef enum {
-		RTP_TCP = 0,
-		RTP_UDP = 1,
-		RTP_MULTICAST = 2,
-	} eRtpType;
-    static Ptr createPlayer(const char* strUrl);
+    typedef std::shared_ptr<DemuxerBase> Ptr;
 
-    //指定网卡ip
-	static const char kNetAdapter[];
-	//设置rtp传输类型，可选项有0(tcp，默认)、1(udp)、2(组播)
-	//设置方法:player[PlayerBase::kRtpType] = 0/1/2;
-	static const char kRtpType[];
-	//rtsp认证用户名
-	static const char kRtspUser[];
-	//rtsp认证用用户密码，可以是明文也可以是md5,md5密码生成方式 md5(username:realm:password)
-	static const char kRtspPwd[];
-	//rtsp认证用用户密码是否为md5
-	static const char kRtspPwdIsMD5[];
+    /**
+     * 获取节目总时长，单位秒
+     * @return
+     */
+    virtual float getDuration() const { return 0;}
 
-	PlayerBase(){};
-	virtual ~PlayerBase(){};
-	virtual void play(const char* strUrl) {};
-	virtual void pause(bool bPause) {};
-	virtual void teardown() {};
-
-	virtual void setOnShutdown( const function<void(const SockException &)> &cb) {};
-	virtual void setOnPlayResult( const function<void(const SockException &ex)> &cb) {};
-	virtual void setOnVideoCB( const function<void(const H264Frame &frame)> &cb) {};
-	virtual void setOnAudioCB( const function<void(const AdtsFrame &frame)> &cb) {};
-    
-	virtual int getVideoHeight() const { return 0; };
-	virtual int getVideoWidth() const { return 0; };
-	virtual float getVideoFps() const { return 0; };
-	virtual int getAudioSampleRate() const { return 0; };
-	virtual int getAudioSampleBit() const { return 0; };
-	virtual int getAudioChannel() const { return 0; };
-	//TrackVideo = 0, TrackAudio = 1
-    virtual float getRtpLossRate(int trackType) const {return 0; };
-	virtual const string& getPps() const { static string null;return null; };
-	virtual const string& getSps() const { static string null;return null; };
-	virtual const string& getAudioCfg() const { static string null;return null; };
-	virtual bool containAudio() const { return false; };
-    virtual bool containVideo() const { return false; };
-    virtual bool isInited() const { return true; };
-    virtual float getDuration() const { return 0;};
-    virtual float getProgress() const { return 0;};
-    virtual void seekTo(float fProgress) {};
-protected:
-    virtual void onShutdown(const SockException &ex) {};
-    virtual void onPlayResult(const SockException &ex) {};
+    /**
+     * 是否初始化完毕，完毕后方可调用getTrack方法
+     * @param analysisMs 数据流最大分析时间 单位毫秒
+     * @return
+     */
+    virtual bool isInited(int analysisMs) { return true; }
 };
 
-template<typename Parent,typename Parser>
-class PlayerImp : public Parent
-{
+
+class PlayerBase : public DemuxerBase, public mINI{
 public:
-	typedef std::shared_ptr<PlayerImp> Ptr;
-	PlayerImp(){};
-	virtual ~PlayerImp(){};
-	void setOnShutdown(const function<void(const SockException &)> &cb) override {
-		if (m_parser) {
-			m_parser->setOnShutdown(cb);
-		}
-		m_shutdownCB = cb;
-	}
-	void setOnPlayResult(const function<void(const SockException &ex)> &cb) override {
-		if (m_parser) {
-			m_parser->setOnPlayResult(cb);
-		}
-		m_playResultCB = cb;
-	}
-	void setOnVideoCB(const function<void(const H264Frame &frame)> &cb) override{
-		if (m_parser) {
-			m_parser->setOnVideoCB(cb);
-		}
-		m_onGetVideoCB = cb;
-	}
-	void setOnAudioCB(const function<void(const AdtsFrame &frame)> &cb) override{
-		if (m_parser) {
-			m_parser->setOnAudioCB(cb);
-		}
-		m_onGetAudioCB = cb;
-	}
-	int getVideoHeight() const override{
-		if (m_parser) {
-			return m_parser->getVideoHeight();
-		}
-		return PlayerBase::getVideoHeight();
-	}
+    typedef std::shared_ptr<PlayerBase> Ptr;
+    static Ptr createPlayer(const EventPoller::Ptr &poller,const string &strUrl);
 
-	int getVideoWidth() const override{
-		if (m_parser) {
-			return m_parser->getVideoWidth();
-		}
-		return PlayerBase::getVideoWidth();
-	}
+    PlayerBase();
+    virtual ~PlayerBase(){}
 
-	float getVideoFps() const override{
-		if (m_parser) {
-			return m_parser->getVideoFps();
-		}
-		return PlayerBase::getVideoFps();
-	}
+    /**
+     * 开始播放
+     * @param strUrl 视频url，支持rtsp/rtmp
+     */
+    virtual void play(const string &strUrl) {}
 
-	int getAudioSampleRate() const override{
-		if (m_parser) {
-			return m_parser->getAudioSampleRate();
-		}
-		return PlayerBase::getAudioSampleRate();
-	}
+    /**
+     * 暂停或恢复
+     * @param bPause
+     */
+    virtual void pause(bool bPause) {}
 
-	int getAudioSampleBit() const override{
-		if (m_parser) {
-			return m_parser->getAudioSampleBit();
-		}
-		return PlayerBase::getAudioSampleBit();
-	}
+    /**
+     * 中断播放
+     */
+    virtual void teardown() {}
 
-	int getAudioChannel() const override{
-		if (m_parser) {
-			return m_parser->getAudioChannel();
-		}
-		return PlayerBase::getAudioChannel();
-	}
+    /**
+     * 设置异常中断回调
+     * @param cb
+     */
+    virtual void setOnShutdown( const function<void(const SockException &)> &cb) {}
 
-	const string& getPps() const override{
-		if (m_parser) {
-			return m_parser->getPps();
-		}
-		return PlayerBase::getPps();
-	}
+    /**
+     * 设置播放结果回调
+     * @param cb
+     */
+    virtual void setOnPlayResult( const function<void(const SockException &ex)> &cb) {}
 
-	const string& getSps() const override{
-		if (m_parser) {
-			return m_parser->getSps();
-		}
-		return PlayerBase::getSps();
-	}
+    /**
+     * 设置播放恢复回调
+     * @param cb
+     */
+    virtual void setOnResume( const function<void()> &cb) {}
 
-	const string& getAudioCfg() const override{
-		if (m_parser) {
-			return m_parser->getAudioCfg();
-		}
-		return PlayerBase::getAudioCfg();
-	}
-	bool containAudio() const override{
-		if (m_parser) {
-			return m_parser->containAudio();
-		}
-		return PlayerBase::containAudio();
-	}
-    bool containVideo() const override{
-        if (m_parser) {
-            return m_parser->containVideo();
-        }
-        return PlayerBase::containVideo();
+    /**
+     * 获取播放进度，取值 0.0 ~ 1.0
+     * @return
+     */
+    virtual float getProgress() const { return 0;}
+
+    /**
+     * 拖动进度条
+     * @param fProgress 进度，取值 0.0 ~ 1.0
+     */
+    virtual void seekTo(float fProgress) {}
+
+    /**
+     * 设置一个MediaSource，直接生产rtsp/rtmp代理
+     * @param src
+     */
+    virtual void setMediaSource(const MediaSource::Ptr & src) {}
+
+    /**
+     * 获取丢包率，只支持rtsp
+     * @param trackType 音频或视频，TrackInvalid时为总丢包率
+     * @return
+     */
+    virtual float getPacketLossRate(TrackType trackType) const {return 0; }
+
+    /**
+     * 获取所有track
+     */
+    vector<Track::Ptr> getTracks(bool trackReady = true) const override{
+        return vector<Track::Ptr>();
     }
-    bool isInited() const override{
-        if (m_parser) {
-            return m_parser->isInited();
+protected:
+    virtual void onShutdown(const SockException &ex) {}
+    virtual void onPlayResult(const SockException &ex) {}
+    /**
+     * 暂停后恢复播放时间
+     */
+    virtual void onResume(){};
+};
+
+template<typename Parent,typename Delegate>
+class PlayerImp : public Parent {
+public:
+    typedef std::shared_ptr<PlayerImp> Ptr;
+
+    template<typename ...ArgsType>
+    PlayerImp(ArgsType &&...args):Parent(std::forward<ArgsType>(args)...){}
+
+    virtual ~PlayerImp(){}
+    void setOnShutdown(const function<void(const SockException &)> &cb) override {
+        if (_delegate) {
+            _delegate->setOnShutdown(cb);
         }
-        return PlayerBase::isInited();
+        _shutdownCB = cb;
     }
-	float getDuration() const override {
-		if (m_parser) {
-			return m_parser->getDuration();
-		}
-		return PlayerBase::getDuration();
-	}
+    void setOnPlayResult(const function<void(const SockException &ex)> &cb) override {
+        if (_delegate) {
+            _delegate->setOnPlayResult(cb);
+        }
+        _playResultCB = cb;
+    }
+
+    void setOnResume(const function<void()> &cb) override {
+        if (_delegate) {
+            _delegate->setOnResume(cb);
+        }
+        _resumeCB = cb;
+    }
+
+    bool isInited(int analysisMs) override{
+        if (_delegate) {
+            return _delegate->isInited(analysisMs);
+        }
+        return Parent::isInited(analysisMs);
+    }
+    float getDuration() const override {
+        if (_delegate) {
+            return _delegate->getDuration();
+        }
+        return Parent::getDuration();
+    }
     float getProgress() const override{
-        if (m_parser) {
-            return m_parser->getProgress();
+        if (_delegate) {
+            return _delegate->getProgress();
         }
-        return PlayerBase::getProgress();
-    };
+        return Parent::getProgress();
+    }
     void seekTo(float fProgress) override{
-        if (m_parser) {
-            return m_parser->seekTo(fProgress);
+        if (_delegate) {
+            return _delegate->seekTo(fProgress);
         }
-        return PlayerBase::seekTo(fProgress);
-    };
-protected:
-	void onShutdown(const SockException &ex) override {
-		if (m_shutdownCB) {
-			m_shutdownCB(ex);
-		}
-	}
-	void onPlayResult(const SockException &ex) override {
-		if (m_playResultCB) {
-			m_playResultCB(ex);
-			m_playResultCB = nullptr;
-		}
-	}
-	function<void(const SockException &ex)> m_shutdownCB;
-	function<void(const SockException &ex)> m_playResultCB;
-	std::shared_ptr<Parser> m_parser;
-	function<void(const H264Frame &frame)> m_onGetVideoCB;
-	function<void(const AdtsFrame &frame)> m_onGetAudioCB;
+        return Parent::seekTo(fProgress);
+    }
 
+    void setMediaSource(const MediaSource::Ptr & src) override {
+        if (_delegate) {
+            _delegate->setMediaSource(src);
+        }
+        _pMediaSrc = src;
+    }
+
+    vector<Track::Ptr> getTracks(bool trackReady = true) const override{
+        if (_delegate) {
+            return _delegate->getTracks(trackReady);
+        }
+        return Parent::getTracks(trackReady);
+    }
+
+    std::shared_ptr<SockInfo> getSockInfo() const{
+        return dynamic_pointer_cast<SockInfo>(_delegate);
+    }
+
+protected:
+    void onShutdown(const SockException &ex) override {
+        if (_shutdownCB) {
+            _shutdownCB(ex);
+            _shutdownCB = nullptr;
+        }
+    }
+
+    void onPlayResult(const SockException &ex) override {
+        if(_playResultCB) {
+            _playResultCB(ex);
+            _playResultCB = nullptr;
+        }
+    }
+
+    void onResume() override{
+        if(_resumeCB){
+            _resumeCB();
+        }
+    }
+protected:
+    function<void(const SockException &ex)> _shutdownCB;
+    function<void(const SockException &ex)> _playResultCB;
+    function<void()> _resumeCB;
+    std::shared_ptr<Delegate> _delegate;
+    MediaSource::Ptr _pMediaSrc;
 };
-} /* namespace Player */
-} /* namespace ZL */
+
+class Demuxer : public PlayerBase, public TrackListener{
+public:
+    Demuxer() = default;
+    ~Demuxer() override = default;
+
+    /**
+     * 返回是否完成初始化完毕
+     * 在构造RtspDemuxer对象时有些rtsp的sdp不包含sps pps信息
+     * 所以要等待接收到到sps的rtp包后才能完成
+     *
+     * 在构造RtmpDemuxer对象时是无法获取sps pps aac_cfg等这些信息，
+     * 所以要调用inputRtmp后才会获取到这些信息，这时才初始化成功
+     * @param analysisMs 数据流最大分析时间 单位毫秒
+     * @return
+     */
+    bool isInited(int analysisMs) override;
+
+    /**
+     * 获取所有Track
+     * @return 所有Track
+     */
+    vector<Track::Ptr> getTracks(bool trackReady = true) const override;
+
+    /**
+     * 获取节目总时长
+     * @return 节目总时长,单位秒
+     */
+    float getDuration() const override;
+
+    /**
+     * 设置track监听器
+     */
+    void setTrackListener(TrackListener *listener);
+
+protected:
+    void addTrack(const Track::Ptr &track) override;
+    void addTrackCompleted() override;
+    void resetTracks() override;
+
+protected:
+    float _fDuration = 0;
+    Ticker _ticker;
+    AudioTrack::Ptr _audioTrack;
+    VideoTrack::Ptr _videoTrack;
+    TrackListener *_listener = nullptr;
+};
+
+} /* namespace mediakit */
 
 #endif /* SRC_PLAYER_PLAYERBASE_H_ */
